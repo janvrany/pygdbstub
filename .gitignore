@@ -83,3 +83,6 @@ Pipfile.lock
 
 # Pyre type checker
 .pyre/
+
+# Core file
+core
