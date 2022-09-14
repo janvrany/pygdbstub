@@ -1,8 +1,5 @@
-from gdb.stub import Stub
-from gdb.stub.arch import PowerPC64
-from gdb.stub.target import Null
+from sys import argv
 
-target = Null(PowerPC64())
+from gdb.stub import main
 
-stub = Stub(target)
-stub.start()
+main(argv)

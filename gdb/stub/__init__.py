@@ -1,6 +1,11 @@
 import enum
 import io
 import sys
+from argparse import ArgumentParser
+
+from gdb.stub.arch import PowerPC64
+from gdb.stub.target import Null
+from gdb.stub.target.microwatt import Microwatt
 
 
 class IOPipe:
@@ -122,6 +127,7 @@ class Stub(object):
         self._rsp = rsp
 
     def start(self):
+        self._target.connect()
         while True:
             self.process1()
 
@@ -259,3 +265,18 @@ class Stub(object):
         reply = self._target.memory_read(int(addr, 16), int(length, 10))
         reply = self._rsp.bytes2hex(reply)
         self._rsp.send(reply)
+
+
+def main(argv=sys.argv):
+    targets = {
+        "null-ppc64le": lambda: Null(PowerPC64()),
+        "microwatt": lambda: Microwatt(),
+    }
+    parser = ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-t", "--target", choices=list(targets.keys()), help="Target to connect to"
+    )
+    args = parser.parse_args(argv[1:])
+    target = targets[args.target]()
+    stub = Stub(target)
+    stub.start()
