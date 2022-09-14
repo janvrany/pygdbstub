@@ -2,7 +2,14 @@
 
 ## Setup
 ```sh
-# Clone the repository
+# Install and compile urjtag (for Microwatt)
+apt install libusb-1.0-0-dev libftdi1-dev python3-dev
+git clone -b ftdi-arty https://github.com/shingarov/urjtag.git
+cd urjtag/urjtag
+PYTHON=python3 ./configure --enable-python --without-ftd2xx
+make -j$(nproc)
+
+# Clone this repository
 git clone https://github.com/janvrany/pygdbstub.git
 cd pygdbstub
 
