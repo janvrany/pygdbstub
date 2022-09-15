@@ -61,6 +61,7 @@ class RSP(object):
             self._io.write("-")
         else:
             self._io.write("+")
+        self._io.flush()
 
     def recv_ack(self) -> bool:
         ack_or_not = self._io.read(1)
@@ -294,6 +295,44 @@ class Stub(object):
         reply = self._target.memory_read(int(addr, 16), int(length, 10))
         reply = self._rsp.bytes2hex(reply)
         self._rsp.send(reply)
+
+    def handle_s(self, packet):
+        """
+        `s [addr]`
+
+        Single step, resuming at addr. If addr is omitted, resume at same address.
+        This packet is deprecated for multi-threading support. See `vCont` packet.
+
+        Reply: See Stop Reply Packets, for the reply specifications.
+        """
+        if len(packet) == 1:
+            self._target.flush()
+            self._target.step()
+            self._rsp.send("S00")
+        else:
+            self._rsp.send("E01")
+
+    def handle_c(self, packet):
+        """
+        `c [addr]`
+
+        Continue at addr, which is the address to resume. If addr is omitted,
+        resume at current address..
+        This packet is deprecated for multi-threading support. See `vCont` packet.
+
+        Reply: See Stop Reply Packets, for the reply specifications.
+        """
+        if len(packet) == 1:
+            self._target.flush()
+            self._target.cont()
+            # Do not send any reply:
+            #
+            #    Except for ‘?’ and ‘vStopped’, that reply is only returned when
+            #    the target halts.
+            #
+            # See https://sourceware.org/gdb/current/onlinedocs/gdb/Stop-Reply-Packets.html#Stop-Reply-Packets
+        else:
+            self._rsp.send("E01")
 
 
 def main(argv=sys.argv):

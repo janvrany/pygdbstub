@@ -166,6 +166,17 @@ class Microwatt(Target):
             self.dmi_write(DBG_WB.ADDR, addr)
             return [self.dmi_read(DBG_WB.DATA) for _ in range(count)]
 
+        def stop(self):
+            self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_STOP)
+
+        def step(self):
+            stat = self.dmi_read(DBG_CORE.STAT)
+            assert (stat & DBG_CORE.STAT_STOPPED) != 0, "Core not stopped!"
+            self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_STEP)
+
+        def start(self):
+            self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_START)
+
     def __init__(self):
         self._cpustate = PowerPC64()
         self._jtag = None
@@ -208,3 +219,12 @@ class Microwatt(Target):
         buf_lo = addr - round_down(addr)
         buf_hi = buf_lo + length
         return buf[buf_lo:buf_hi]
+
+    def stop(self):
+        self._jtag.stop()
+
+    def step(self):
+        self._jtag.step()
+
+    def cont(self):
+        self._jtag.start()

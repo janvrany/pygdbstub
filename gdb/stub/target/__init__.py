@@ -17,6 +17,17 @@ class Target(object):
     def register_read(self, regnum: int) -> bytes:
         raise Exception("Should be implemented!")
 
+    def stop(self):
+        raise Exception("Should be implemented!")
+
+    def step(self):
+        raise Exception("Should be implemented!")
+
+    def cont(self):
+        raise Exception("Should be implemented!")
+
+    # Common methods
+
     @property
     def registers(self):
         registers = self._cpustate.registers
@@ -25,6 +36,13 @@ class Target(object):
             if not reg.has_value:
                 reg.set_bytes(self.register_read(reg.regnum))
         return registers
+
+    def flush(self):
+        """
+        Flush all cached data, most notably registers.
+        Called by Stub before resuming the target
+        """
+        self._cpustate.registers.flush()
 
     #
     # __enter__ and __exit__ allow to use `with` statement.
@@ -59,3 +77,12 @@ class Null(Target):
 
     def register_read(self, regnum: int) -> bytes:
         return self._cpustate.registers[regnum].get_bytes()
+
+    def stop(self):
+        pass
+
+    def step(self):
+        pass
+
+    def cont(self):
+        pass
