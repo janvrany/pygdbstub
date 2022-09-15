@@ -90,12 +90,25 @@ class RSP(object):
         # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Overview
         self.send("")
 
-
     def recv(self) -> str | None:
         while True:
             c = self._io.read(1)
             if c is None:
                 return None
+            if c == "\x03":
+                # Handle Ctrl-C
+                #
+                #    ‘Ctrl-C’, on the other hand, is defined and implemented
+                #    for all transport mechanisms. It is represented by sending
+                #    the single byte 0x03 without any of the usual packet overhead
+                #    described in the Overview section (see Overview). When a 0x03
+                #    byte is transmitted as part of a packet, it is considered to be
+                #    packet data and does not represent an interrupt. E.g., an ‘X’
+                #    packet (see X packet), used for binary downloads, may include
+                #    an unescaped 0x03 as part of its packet.
+                #
+                # See https://sourceware.org/gdb/current/onlinedocs/gdb/Interrupts.html#interrupting-remote-targets
+                return c
             elif c == "$":
                 break
 
@@ -226,6 +239,32 @@ class Stub(object):
             self._rsp.send("")
         elif packet.startswith("vKill"):
             self._rsp.send("OK")
+        elif packet.startswith("vCont?"):
+            """
+            `vCont?`
+            Request a list of actions supported by the `vCont` packet.
+
+            Reply:
+                * `vCont[;action…]` The `vCont` packet is supported. Each action is a supported command in the `vCont` packet.
+                * `` (empty reply) The ‘vCont’ packet is not supported.
+            """
+            # We do not support vCont
+            self._rsp.send_unsupported()
+        elif packet.startswith("vCtrlC"):
+            """
+            `vCtrlC`
+            Interrupt remote target as if a control-C was pressed on the remote terminal. This is the equivalent
+            to reacting to the ^C (`\003`, the control-C character) character in all-stop mode while the target
+            is running, except this works in non-stop mode. See interrupting remote targets, for more info on the
+            all-stop variant.
+
+            Reply:
+                * `E nn` for an error
+                * `OK` for success
+            """
+            self._target.flush()
+            self._target.stop()
+            self._rsp.send("OK")
         else:
             self._rsp.send_unsupported()
 
@@ -295,6 +334,13 @@ class Stub(object):
         reply = self._target.memory_read(int(addr, 16), int(length, 10))
         reply = self._rsp.bytes2hex(reply)
         self._rsp.send(reply)
+
+    def handle_etx(self, packet):
+        # Ctrl-C was pressed in GDB. Stop the target...
+        self._target.flush()
+        self._target.stop()
+        # ...and report it has stopped.
+        self._rsp.send("S00")
 
     def handle_s(self, packet):
         """
