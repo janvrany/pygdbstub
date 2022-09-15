@@ -140,25 +140,42 @@ class Stub(object):
 
     def start(self):
         self._target.connect()
-        while True:
-            self.process1()
+        try:
+            self._target.flush()
+            self._target.stop()
+            while self.process1():
+                pass
+        finally:
+            self._target.disconnect()
 
     def process1(self):
         """
-        Wait and process single packet, then return.
+        Wait for and process single packet. Return `True` if packet
+        was processed (even if there was an error processing it),
+        `False` if there were no more packets (connection closed)
         """
         packet = self._rsp.recv()
-        try:
-            packet_type = packet[0]
-            # Sigh, some packet types are not letters so
-            # handle them specially
-            if packet_type == "?":
-                handler = self.handle_questionmark
-            else:
+        if packet is None:
+            return False
+        packet_type = packet[0]
+        # Sigh, some packet types are not letters so
+        # handle them specially
+        if packet_type == "?":
+            handler = self.handle_questionmark
+        elif packet_type == "\x03":
+            handler = self.handle_etx
+        else:
+            try:
                 handler = getattr(self, "handle_" + packet_type)
+            except AttributeError:
+                self._rsp.send_unsupported()
+                return
+        try:
             handler(packet)
-        except AttributeError:
-            self._rsp.send("EFF")
+        except Exception:
+            # Error when processing the packet
+            self._rsp.send("EF1")
+        return True
 
     def handle_q(self, packet):
         if packet.startswith("qSupported"):
