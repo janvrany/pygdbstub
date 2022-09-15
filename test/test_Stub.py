@@ -24,7 +24,7 @@ def test_bogus() -> None:
 
     stub.process1()
 
-    assert gdb_recv.getvalue() == "+$EFF#d1"
+    assert gdb_recv.getvalue() == "+$#00"
 
 
 def test_g() -> None:

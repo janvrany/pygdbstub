@@ -78,6 +78,18 @@ class RSP(object):
         self._io.flush()
         assert self.recv_ack()
 
+    def send_unsupported(self):
+        # Packet not (yet) supported.
+        #
+        #    For any command not supported by the stub, an empty response
+        #    (‘$#00’) should be returned. That way it is possible to extend
+        #    the protocol. A newer GDB can tell if a packet is supported
+        #    based on that response.
+        #
+        # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Overview
+        self.send("")
+
+
     def recv(self) -> str | None:
         while True:
             c = self._io.read(1)
@@ -160,7 +172,7 @@ class Stub(object):
             See https://sourceware.org/gdb/current/onlinedocs/gdb/Tracepoint-Packets.html#Tracepoint-Packets
             """
             # We do not support tracing, just reply an empty packet
-            self._rsp.send("")
+            self._rsp.send_unsupported()
         elif packet.startswith("qC"):
             """
             `qC`
@@ -189,7 +201,7 @@ class Stub(object):
             # We are always attached, so reply "1"
             self._rsp.send("1")
         else:
-            self._rsp.send("EF0")
+            self._rsp.send_unsupported()
 
     def handle_v(self, packet):
         if packet.startswith("vMustReplyEmpty"):
@@ -197,7 +209,7 @@ class Stub(object):
         elif packet.startswith("vKill"):
             self._rsp.send("OK")
         else:
-            self._rsp.send("EF1")
+            self._rsp.send_unsupported()
 
     def handle_H(self, packet):
         """
