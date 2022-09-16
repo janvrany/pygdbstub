@@ -190,6 +190,9 @@ class Microwatt(Target):
         def start(self):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_START)
 
+        def creset(self):
+            self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_RESET)
+
     def __init__(self):
         self._cpustate = PowerPC64()
         self._jtag = None
@@ -217,7 +220,7 @@ class Microwatt(Target):
             # Register not supported by Microwatt (debug interface)
             raw = 0
         # Second, convert raw value back to bytes...
-        value = i64_to_bytes(raw)
+        value = i642bytes(raw)
         # ...and truncate to correct length
         value = value[0 : reg.size // 8]
         return value

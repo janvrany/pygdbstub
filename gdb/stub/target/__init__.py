@@ -29,6 +29,9 @@ class Target(object):
     def cont(self):
         raise Exception("Should be implemented!")
 
+    def reset(self):
+        raise Exception("Should be implemented!")
+
     # Common methods
 
     @property

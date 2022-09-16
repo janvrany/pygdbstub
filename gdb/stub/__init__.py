@@ -286,11 +286,9 @@ class Stub(object):
     def handle_v(self, packet):
         if packet.startswith("vMustReplyEmpty"):
             self._rsp.send("")
-        elif packet.startswith("vKill"):
-            self._rsp.send("OK")
         elif packet.startswith("vCont?"):
             """
-            `vCont?`
+            `vCont?`p
             Request a list of actions supported by the `vCont` packet.
 
             Reply:
@@ -444,6 +442,22 @@ class Stub(object):
         else:
             self._rsp.send("E01")
 
+    def handle_k(self, packet):
+        """
+        `k`
+        Kill request.
+
+        The exact effect of this packet is not specified.
+
+        For a bare-metal target, it may power cycle or reset the target system.
+        For that reason, the `k` packet has no reply.
+
+        ...
+        """
+        self._target.flush()
+        self._target.reset()
+        self._rsp.send("S00")
+
 
 def main(argv=sys.argv):
     targets = {
@@ -452,7 +466,7 @@ def main(argv=sys.argv):
     }
     parser = ArgumentParser(description=main.__doc__)
     parser.add_argument(
-        "-t", "--target", choices=list(targets.keys()), help="Target to connect to"
+        "-t", "--target", choices=list(targets.keys()), help="Target to connect to."
     )
     parser.add_argument(
         "-p",
