@@ -17,6 +17,9 @@ class Target(object):
     def register_read(self, regnum: int) -> bytes:
         raise Exception("Should be implemented!")
 
+    def memory_write(self, address: int, length: int, data: bytes) -> None:
+        raise Exception("Should be implemented!")
+
     def stop(self):
         raise Exception("Should be implemented!")
 
@@ -78,6 +81,9 @@ class Null(Target):
     def register_read(self, regnum: int) -> bytes:
         return self._cpustate.registers[regnum].get_bytes()
 
+    def memory_write(self, address: int, length: int, data: bytes) -> None:
+        pass
+
     def stop(self):
         pass
 
@@ -85,4 +91,7 @@ class Null(Target):
         pass
 
     def cont(self):
+        pass
+
+    def reset(self):
         pass

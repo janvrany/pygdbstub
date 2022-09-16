@@ -47,8 +47,27 @@ class IOPipe:
     def readinto(self, buffer: str) -> int:
         return self._in.readinto(self, buffer)
 
+Bytes2HexMap = ["%02x" % x for x in range(256)]
 
-ByteToHexMap = ["%02x" % x for x in range(256)]
+
+def bytes2hex(*data: bytes) -> str:
+    hex = io.StringIO()
+    for datum in data:
+        for b in datum:
+            hex.write(Bytes2HexMap[b])
+    return hex.getvalue()
+
+
+Hex2BytesMap = {("%02x" % x): x for x in range(256)}
+
+
+def hex2bytes(hex: str) -> bytearray:
+    assert len(hex) % 2 == 0
+    data = bytearray(len(hex) // 2)
+    for i in range(len(data)):
+        b = Hex2BytesMap[hex[2 * i : 2 * i + 2]]
+        data[i] = b
+    return data
 
 
 class RSP(object):
@@ -59,13 +78,6 @@ class RSP(object):
 
     def __init__(self, channel=IOPipe()):
         self._io = channel
-
-    def bytes2hex(self, *data: bytes) -> str:
-        hex = io.StringIO()
-        for datum in data:
-            for b in datum:
-                hex.write(ByteToHexMap[b])
-        return hex.getvalue()
 
     def checksum(self, data: str) -> int:
         # FIXME: handle escaping
@@ -369,9 +381,24 @@ class Stub(object):
         """
         addr, length = packet[1:].split(",")
         reply = self._target.memory_read(int(addr, 16), int(length, 10))
-        reply = self._rsp.bytes2hex(reply)
+        reply = bytes2hex(reply)
         self._rsp.send(reply)
 
+    def handle_M(self, packet):
+        """
+        `M addr,length:XX…`
+        Write length addressable memory units starting at address addr (see addressable
+        memory unit). The data is given by XX…; each byte is transmitted as a two-digit
+        hexadecimal number.
+
+        Reply:
+            * `OK` for success
+            * `E NN` for an error (this includes the case where only part of the data was written).
+        """
+        addr, length_and_data = packet[1:].split(",")
+        length, data = length_and_data.split(":")
+        self._target.memory_write(int(addr, 16), int(length, 10), hex2bytes(data))
+        self._rsp.send("OK")
     def handle_etx(self, packet):
         # Ctrl-C was pressed in GDB. Stop the target...
         self._target.flush()

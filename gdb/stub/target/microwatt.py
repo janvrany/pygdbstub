@@ -70,9 +70,14 @@ DBG_REGNAMES = (
 )
 
 
-def i64_to_bytes(data: int, buffer: bytearray = bytearray(8), offset: int = 0) -> bytes:
+def i642bytes(data: int, buffer: bytearray = bytearray(8), offset: int = 0) -> bytes:
     struct.pack_into("Q", buffer, offset, data)
     return buffer
+
+
+def bytes2i64(buffer: bytes, offset: int = 0) -> int:
+    assert (len(buffer) - offset) >= 8
+    return struct.unpack_from("Q", buffer, offset)[0]
 
 
 def is_aligned(value: int, boundary_in_bytes: int = 8):
@@ -166,6 +171,14 @@ class Microwatt(Target):
             self.dmi_write(DBG_WB.ADDR, addr)
             return [self.dmi_read(DBG_WB.DATA) for _ in range(count)]
 
+        def memory_write(self, addr: int, data: int) -> None:
+            # Convert unsigned addr into signed 64bit (Python) int
+            if addr > 0x7FFF_FFFF_FFFF_FFFF:
+                addr = addr - (1 << 64)
+            self.dmi_write(DBG_WB.CTRL, 0x7FF)
+            self.dmi_write(DBG_WB.ADDR, addr)
+            self.dmi_write(DBG_WB.DATA, data)
+
         def stop(self):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_STOP)
 
@@ -214,11 +227,32 @@ class Microwatt(Target):
         buf = bytearray(buflen)
         offset = 0
         for word in self._jtag.memory_read(round_down(addr), len(buf) // 8):
-            i64_to_bytes(word, buf, offset)
+            i642bytes(word, buf, offset)
             offset += 8
         buf_lo = addr - round_down(addr)
         buf_hi = buf_lo + length
         return buf[buf_lo:buf_hi]
+
+    def memory_write(self, addr: int, length: int, data: bytes) -> None:
+        buflen = round_up(addr + length) - round_down(addr)
+        buf = bytearray(buflen)
+        buf_lo = addr - round_down(addr)
+        buf_hi = buf_lo + length
+        if buf_lo != 0:
+            # Non-aligned write, read first machine word
+            # (which will be partially overwritten with
+            # passed `data`)
+            word = self._jtag.memory_read(round_down(addr), 1)[0]
+            i642bytes(word, buf, 0)
+        if buf_hi != buflen:
+            # Non-aligned write, read last machine word
+            # (which will be partially overwritten with
+            # passed `data`)
+            word = self._jtag.memory_read(round_up(addr + length) - 8, 1)[0]
+            i642bytes(word, buf, buflen - 8)
+        buf[buf_lo:buf_hi] = data[0:length]
+        for offset in range(0, buflen, 8):
+            self._jtag.memory_write(round_down(addr) + offset, bytes2i64(buf, offset))
 
     def stop(self):
         self._jtag.stop()
@@ -228,3 +262,9 @@ class Microwatt(Target):
 
     def cont(self):
         self._jtag.start()
+
+    def reset(self):
+        self._jtag.stop()
+        self._jtag.creset()
+        # Perform the first step() which does (?) nothing
+        self._jtag.step()
