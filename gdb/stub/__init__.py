@@ -2,17 +2,27 @@ import enum
 import io
 import sys
 from argparse import ArgumentParser
+from socket import SocketIO
 
 from gdb.stub.arch import PowerPC64
-from gdb.stub.target import Null
+from gdb.stub.target import Null, Target
 from gdb.stub.target.microwatt import Microwatt
 
 
 class IOPipe:
-    def __init__(self, _in=sys.stdin, _out=sys.stdout):
-        self._in = _in
-        self._out = _out
-        sys.stdout.reconfigure(line_buffering=False, write_through=False)
+    def __init__(
+        self,
+        _in=sys.stdin,
+        _out=sys.stdout,
+    ):
+        if isinstance(_in, io.RawIOBase):
+            self._in = io.TextIOWrapper(_in, "ascii")
+        else:
+            self._in = _in
+        if isinstance(_out, io.RawIOBase):
+            self._out = io.TextIOWrapper(_out, "ascii")
+        else:
+            self._out = _out
 
     def write(self, buffer: str):
         self._out.write(buffer)
@@ -20,8 +30,19 @@ class IOPipe:
     def flush(self):
         self._out.flush()
 
-    def read(self, count: int) -> str:
-        return self._in.read(count)
+    def read(self, count: int) -> str | None:
+        """
+        Wait for and read `count` characters. Return `None`
+        if there are no more data to read (peer closed the
+        connection).
+        """
+        data = self._in.read(count)
+        if data is None:
+            return None
+        elif len(data) == 0:
+            return None
+        else:
+            return data
 
     def readinto(self, buffer: str) -> int:
         return self._in.readinto(self, buffer)
@@ -94,7 +115,9 @@ class RSP(object):
         while True:
             c = self._io.read(1)
             if c is None:
+                # Client closed the connection
                 return None
+
             if c == "\x03":
                 # Handle Ctrl-C
                 #
@@ -148,21 +171,35 @@ class TARGET_SIGNAL(enum.IntEnum):
 
 
 class Stub(object):
-    def __init__(self, target, rsp=RSP()):
+    def __init__(self, target: Target, channel: IOPipe = IOPipe()):
         self._target = target
-        self._rsp = rsp
+        self._rsp = RSP(channel)
+
+    #
+    # __enter__ and __exit__ allow to use `with` statement.
+    # This is useful for interactive work with target.
+    #
+    def __enter__(self):
+        self._target.connect()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self._target.disconnect()
+
+    #
+    # Ensure that gets disconnected when the object is gone.
+    #
+    def __del__(self):
+        self._target.disconnect()
 
     def start(self):
-        self._target.connect()
-        try:
+        with self:
             self._target.flush()
             self._target.stop()
             while self.process1():
                 pass
-        finally:
-            self._target.disconnect()
 
-    def process1(self):
+    def process1(self) -> bool:
         """
         Wait for and process single packet. Return `True` if packet
         was processed (even if there was an error processing it),
@@ -386,11 +423,51 @@ def main(argv=sys.argv):
         "null-ppc64le": lambda: Null(PowerPC64()),
         "microwatt": lambda: Microwatt(),
     }
-    parser = ArgumentParser(description=__doc__)
+    parser = ArgumentParser(description=main.__doc__)
     parser.add_argument(
         "-t", "--target", choices=list(targets.keys()), help="Target to connect to"
     )
+    parser.add_argument(
+        "-p",
+        "--port",
+        type=int,
+        help="TCP port to listen on. If not specified, use stdin/stdout for communication with GDB.",
+    )
     args = parser.parse_args(argv[1:])
     target = targets[args.target]()
-    stub = Stub(target)
-    stub.start()
+    if args.port is None:
+        #
+        # Use stdin/stdout for communication.
+        #
+        stub = Stub(target)
+        stub.start()
+    else:
+        #
+        # Listen on TCP port
+        #
+        from socket import AF_INET, SOCK_STREAM, error, socket
+
+        listener = socket(AF_INET, SOCK_STREAM)
+        # Wait for client to connect...
+        try:
+
+            listener.bind(("localhost", args.port))
+            print(f"Listening on localhost:{args.port}")
+            listener.listen(1)
+        except error as e:
+            print(f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}")
+        client, addr = listener.accept()
+
+        # Once client connects, stop listening and
+        # start stub on client socket
+        try:
+            print(f"Client connected from {addr[0]}:{addr[1]}")
+            listener.close()
+            client_io = SocketIO(client, "rw")
+            try:
+                stub = Stub(target, IOPipe(client_io, client_io))
+                stub.start()
+            finally:
+                client_io.close()
+        except error as e:
+            print(f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}")
