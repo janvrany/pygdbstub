@@ -433,7 +433,20 @@ def main(argv=sys.argv):
         type=int,
         help="TCP port to listen on. If not specified, use stdin/stdout for communication with GDB.",
     )
+    parser.add_argument(
+        "-d",
+        "--debug",
+        action="store_const",
+        const=True,
+        default=False,
+        help="Open a debugger on uncaught exception. Only really usefull when using TCP stream",
+    )
     args = parser.parse_args(argv[1:])
+    if args.debug:
+        from .debug import breakpointhook, excepthook
+
+        sys.excepthook = excepthook
+        sys.breakpointhook = breakpointhook
     target = targets[args.target]()
     if args.port is None:
         #
