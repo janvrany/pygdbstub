@@ -1,5 +1,7 @@
 import enum
+import io
 import struct
+from typing import TextIO
 
 import urjtag
 
@@ -179,11 +181,37 @@ class Microwatt(Target):
             self.dmi_write(DBG_WB.ADDR, addr)
             self.dmi_write(DBG_WB.DATA, data)
 
+        def status(self):
+            return self.dmi_read(DBG_CORE.STAT)
+
+        def status_string(self):
+            stat = self.status()
+            statstr = "running"
+            statstr2 = ""
+            if stat & DBG_CORE.STAT_STOPPED:
+                statstr = "stopped"
+                if not stat & DBG_CORE.STAT_STOPPING:
+                    # if (!(stat & DBG_CORE_STAT_STOPPING))
+                    statstr2 = " (restarting?)"
+                elif stat & DBG_CORE.STAT_TERM:
+                    # else if (stat & DBG_CORE_STAT_TERM)
+                    statstr2 = " (terminated)"
+            elif stat & DBG_CORE.STAT_STOPPING:
+                # } else if (stat & DBG_CORE_STAT_STOPPING) {
+                statstr = "stopping"
+                if stat & DBG_CORE.STAT_TERM:
+                    # if (stat & DBG_CORE_STAT_TERM)
+                    statstr2 = " (terminated)"
+            elif stat & DBG_CORE.STAT_TERM:
+                # } else if (stat & DBG_CORE_STAT_TERM)
+                statstr = "odd state (TERM but no STOP)"
+            return statstr + statstr2
+
         def stop(self):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_STOP)
 
         def step(self):
-            stat = self.dmi_read(DBG_CORE.STAT)
+            stat = self.status()
             assert (stat & DBG_CORE.STAT_STOPPED) != 0, "Core not stopped!"
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_STEP)
 
@@ -271,3 +299,46 @@ class Microwatt(Target):
         self._jtag.creset()
         # Perform the first step() which does (?) nothing
         self._jtag.step()
+
+    def monitor(self, command_line: str, response: TextIO) -> bool:
+        command, *args = command_line.split()
+        if command == "status":
+            assert len(args) == 0
+            pass
+        elif command == "step":
+            assert len(args) == 0
+            # Must flush register cache!
+            self._cpustate.registers.flush()
+            self._jtag.creset()
+        elif command == "creset":
+            assert len(args) == 0
+            self._jtag.creset()
+        elif command.startswith("gpr"):
+            assert len(args) >= 1, "missing register name"
+            assert args[0] in DBG_REGNAMES, "invalid register name"
+            start = DBG_REGNAMES.index(args[0])
+            if len(args) == 2:
+                stop = min(start + int(args[1], base=0), len(DBG_REGNAMES))
+            else:
+                stop = start + 1
+            for i in range(start, stop):
+                v = self._jtag.register_read(i)
+                response.write("%8s %016x\n" % (DBG_REGNAMES[i] + ":", v))
+        elif command.startswith("mr"):
+            assert len(args) >= 1, "missing address"
+            addr = round_down(int(args[0], base=0))
+            if len(args) == 2:
+                count = int(args[1], base=0)
+            else:
+                count = 1
+            for v in self._jtag.memory_read(addr, count):
+                response.write("%016x: %016x\n" % (addr, v))
+                addr += 8
+        else:
+            # Unsupported / invalid monitor command
+            return False
+        status = self._jtag.status_string()
+        nia = self._jtag.register_read_nia()
+        msr = self._jtag.register_read_msr()
+        response.write("Core: %s\n NIA: %016x\n MSR: %016x\n" % (status, nia, msr))
+        return True
