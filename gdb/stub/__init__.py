@@ -44,8 +44,6 @@ class IOPipe:
         else:
             return data
 
-    def readinto(self, buffer: str) -> int:
-        return self._in.readinto(self, buffer)
 
 Bytes2HexMap = ["%02x" % x for x in range(256)]
 
@@ -79,16 +77,6 @@ class RSP(object):
     def __init__(self, channel=IOPipe()):
         self._io = channel
 
-    def checksum(self, data: str) -> int:
-        # FIXME: handle escaping
-        # See https://github.com/openrisc/or1ksim/blob/or1k-master/debug/rsp-server.c#L689
-        sum = 0
-        for c in data:
-            v = ord(c)
-            assert v < 128
-            sum += v
-        return sum & 0xFF
-
     def send_ack(self, request_retransmit=False) -> None:
         if request_retransmit:
             self._io.write("-")
@@ -103,12 +91,28 @@ class RSP(object):
 
     def send(self, data: str) -> None:
         self._io.write("$")
+        csum = 0
         for c in data:
-            # FIXME: handle escaping
-            # See https://github.com/openrisc/or1ksim/blob/or1k-master/debug/rsp-server.c#L689
+            assert ord(c) < 256
+            if c in ("$", "#", "*", "}"):
+                # Handle escaping.
+                #
+                #    The binary data representation uses 7d (ASCII ‘}’) as an escape character. Any escaped byte is
+                #    transmitted as the escape character followed by the original character XORed with 0x20. For
+                #    example, the byte 0x7d would be transmitted as the two bytes 0x7d 0x5d. The bytes 0x23 (ASCII ‘#’),
+                #    0x24 (ASCII ‘$’), and 0x7d (ASCII ‘}’) must always be escaped. Responses sent by the stub must also
+                #    escape 0x2a (ASCII ‘*’), so that it is not interpreted as the start of a run-length encoded
+                #    sequence (described next).
+                #
+                # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Binary-Data
+                csum += ord("}")
+                self._io.write("}")
+                c = chr(ord(c) ^ 0x20)
+            csum += ord(c)
             self._io.write(c)
+        csum = csum & 0xFF
         self._io.write("#")
-        self._io.write("%02x" % self.checksum(data))
+        self._io.write("%02x" % csum)
         self._io.flush()
         assert self.recv_ack()
 
@@ -148,20 +152,46 @@ class RSP(object):
                 break
 
         buffer = io.StringIO()
+        buffer_csum = 0
+
         while True:
             c = self._io.read(1)
-            # FIXME: handle escaping
-            # See https://github.com/openrisc/or1ksim/blob/or1k-master/debug/rsp-server.c#L689
-            if c == "#":
+            if c is None:
+                # Client closed the connection
+                return None
+            if c == "}":
+                # Handle escaping.
+                #
+                #    The binary data representation uses 7d (ASCII ‘}’) as an escape character. Any escaped byte is
+                #    transmitted as the escape character followed by the original character XORed with 0x20. For
+                #    example, the byte 0x7d would be transmitted as the two bytes 0x7d 0x5d. The bytes 0x23 (ASCII ‘#’),
+                #    0x24 (ASCII ‘$’), and 0x7d (ASCII ‘}’) must always be escaped. Responses sent by the stub must also
+                #    escape 0x2a (ASCII ‘*’), so that it is not interpreted as the start of a run-length encoded
+                #    sequence (described next).
+                #
+                # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Binary-Data
+                c = self._io.read(1)
+                if c is None:
+                    # Client closed the connection
+                    return None
+                else:
+                    # Update checksum
+                    buffer_csum += ord(c)
+                buffer_csum += ord("}") + ord(c)
+                buffer.write(chr(ord(c) ^ 0x20))
+            elif c == "#":
                 break
             else:
+                buffer_csum += ord(c)
                 buffer.write(c)
-        data = buffer.getvalue()
+        buffer_csum = buffer_csum & 0xFF
 
         csum = int("0x" + self._io.read(2), 16)
-        assert csum == self.checksum(data)
+        assert (
+            csum == buffer_csum
+        ), f"Checksums do not match (sent: {hex(csum)}, recv'd: {hex(buffer_csum)})"
         self.send_ack()
-        return data
+        return buffer.getvalue()
 
 
 class TARGET_SIGNAL(enum.IntEnum):
@@ -232,7 +262,7 @@ class Stub(object):
                 handler = getattr(self, "handle_" + packet_type)
             except AttributeError:
                 self._rsp.send_unsupported()
-                return
+                return True
         try:
             handler(packet)
         except Exception:
@@ -355,7 +385,7 @@ class Stub(object):
             * `XX…` Each byte of register data is described by two hex digits.
             * `E NN` for an error.
         """
-        reply = self._rsp.bytes2hex(*[bytes(reg) for reg in self._target.registers])
+        reply = bytes2hex(*[bytes(reg) for reg in self._target.registers])
         self._rsp.send(reply)
 
     def handle_m(self, packet):
