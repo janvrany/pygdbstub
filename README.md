@@ -8,6 +8,7 @@ git clone -b ftdi-arty https://github.com/shingarov/urjtag.git
 cd urjtag/urjtag
 PYTHON=python3 ./configure --enable-python --without-ftd2xx
 make -j$(nproc)
+cd ../..
 
 # Clone this repository
 git clone https://github.com/janvrany/pygdbstub.git
@@ -15,10 +16,12 @@ cd pygdbstub
 
 # Create virtual environment for pygdbstub
 virtualenv --prompt "pygdbstub" .venv
+echo "export LD_LIBRARY_PATH=$(realpath ../urjtag/urjtag/src/.libs)" >> .venv/bin/activate
 source .venv/bin/activate
 
 # Install dependencies
-pip3 install -r requirements-dev.txt 
+pip3 install -r requirements-dev.txt
+pip3 install ../urjtag/urjtag/bindings/python
 
 # Setup pre-commit and pre-push hooks (if you want)
 pipenv run pre-commit install -t pre-commit
