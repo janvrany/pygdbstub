@@ -56,6 +56,10 @@ def bytes2hex(*data: bytes) -> str:
     return hex.getvalue()
 
 
+def string2hex(*data: str) -> str:
+    return bytes2hex(*[bytes(datum, "ascii") for datum in data])
+
+
 Hex2BytesMap = {("%02x" % x): x for x in range(256)}
 
 
@@ -66,6 +70,10 @@ def hex2bytes(hex: str) -> bytearray:
         b = Hex2BytesMap[hex[2 * i : 2 * i + 2]]
         data[i] = b
     return data
+
+
+def hex2string(hex: str) -> str:
+    return hex2bytes(hex).decode("ascii")
 
 
 class RSP(object):
@@ -310,6 +318,36 @@ class Stub(object):
             """
             # We are always attached, so reply "1"
             self._rsp.send("1")
+        elif packet.startswith("qRcmd"):
+            """
+            `qRcmd,command`
+            command (hex encoded) is passed to the local interpreter for execution.
+            Invalid commands should be reported using the output string. Before the
+            final result packet, the target may also respond with a number of intermediate
+            `Ooutput` console output packets. Implementors should note that providing
+            access to a stubs's interpreter may have security implications.
+
+            Reply:
+                * `OK` A command response with no output.
+                * `OUTPUT` A command response with the hex encoded output string OUTPUT.
+                * `E NN` Indicate a badly formed request. The error number NN is given as hex digits.
+                * An empty reply indicates that `qRcmd` is not recognized.
+            """
+            _, command = packet.split(",")
+            try:
+                response = io.StringIO()
+                handled = self._target.monitor(hex2string(command), response)
+                if handled is None:
+                    self._rsp.send_unsupported()
+                elif handled is True:
+                    if response.getvalue() is None:
+                        self._rsp.send("OK")
+                    else:
+                        self._rsp.send(string2hex(*[response.getvalue()]))
+                else:
+                    self._rsp.send("EF0")
+            except Exception:
+                self._rsp.send("EF1")
         else:
             self._rsp.send_unsupported()
 

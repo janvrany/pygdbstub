@@ -1,3 +1,5 @@
+from typing import TextIO
+
 from gdb.stub.arch import Arch
 
 
@@ -31,6 +33,21 @@ class Target(object):
 
     def reset(self):
         raise Exception("Should be implemented!")
+
+    # Additional methods that may be implemented (but are not
+    # mandatory).
+    def monitor(self, command: str, response: TextIO) -> bool | None:
+        """
+        Handle `monitor` command, writing response to passed
+        `response` IO.
+        Return:
+            * `True` if command is supported (and response written)
+            * `False` if command is not supported / malformed
+            * `None` if target does not implement monitor commands
+
+        """
+        # By default, monitor commands are not supported.
+        return None
 
     # Common methods
 
