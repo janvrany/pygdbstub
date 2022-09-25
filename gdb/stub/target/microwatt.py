@@ -146,6 +146,11 @@ class Microwatt(Target):
                     raise Exception("Unknown status code %d!" % rc)
 
         def dmi_write(self, addr: int, data: int):
+            # Convert unsigned into signed 64bit (Python) int
+            if addr > 0x7FFF_FFFF_FFFF_FFFF:
+                addr = addr - (1 << 64)
+            if data > 0x7FFF_FFFF_FFFF_FFFF:
+                data = data - (1 << 64)
             rc, _ = self.command(2, addr, data)
             while True:
                 rc, _ = self.command(0, 0)
@@ -166,17 +171,11 @@ class Microwatt(Target):
             return self.dmi_read(DBG_CORE.GSPR_DATA)
 
         def memory_read(self, addr: int, count: int = 1) -> list[int]:
-            # Convert unsigned addr into signed 64bit (Python) int
-            if addr > 0x7FFF_FFFF_FFFF_FFFF:
-                addr = addr - (1 << 64)
             self.dmi_write(DBG_WB.CTRL, 0x7FF)
             self.dmi_write(DBG_WB.ADDR, addr)
             return [self.dmi_read(DBG_WB.DATA) for _ in range(count)]
 
         def memory_write(self, addr: int, data: int) -> None:
-            # Convert unsigned addr into signed 64bit (Python) int
-            if addr > 0x7FFF_FFFF_FFFF_FFFF:
-                addr = addr - (1 << 64)
             self.dmi_write(DBG_WB.CTRL, 0x7FF)
             self.dmi_write(DBG_WB.ADDR, addr)
             self.dmi_write(DBG_WB.DATA, data)
