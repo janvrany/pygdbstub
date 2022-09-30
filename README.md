@@ -28,17 +28,47 @@ pipenv run pre-commit install -t pre-commit
 pipenv run pre-commit install -t pre-push
 ```
 
+## Usage examples
+
+### Using TCP port
+
+```
+.venv/bin/python -m gdb.stub -t microwatt -p 7000
+```
+
+* run *pygdbstub* (`-m gdb.stub`)
+* connect to Microwatt on Arty FPGA (`-t microwatt`)
+* listen on localhost, port 7000 (`-p 7000`)
+
+Then in GDB, connect to stub like:
+
+```
+(gdb) set arch powerpc:common64
+(gdb) target remote :7000
+```
+
+### Starting *pygdbstub* directly from GDB
+
+```
+(gdb) set arch powerpc:common64
+(gdb) target remote | .venv/bin/python -m gdb.stub -t microwatt
+```
+
+* run *pygdbstub* (`-m gdb.stub`)
+* connect to Microwatt on Arty FPGA (`-t microwatt`)
+* use stdio to communicate with GDB (default)
+
 ## Debugging communication
 
 Some hints to help debuging communication between GDB and pygdbstub:
 
- * In GDB, turn on remote protocol debugging: 
-   
+ * In GDB, turn on remote protocol debugging:
+
    ```
    set debug remote 1
    ```
 
- * If you really want to see the exact bytes going back and forth, run 
+ * If you really want to see the exact bytes going back and forth, run
    stub using `socat`:
 
    ```
