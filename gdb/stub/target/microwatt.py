@@ -1,5 +1,4 @@
 import enum
-import io
 import struct
 from typing import TextIO
 
@@ -238,7 +237,7 @@ class Microwatt(Target):
         reg = self._cpustate.registers[regnum]
         # First, read the raw (as uint64) using JTAG
         if reg.name == "pc":
-            raw = self._jtag.register_read_nia()
+            raw = self._jtag.register_read_nia() & 0xFFFFFFFF
         elif reg.name == "msr":
             raw = self._jtag.register_read_msr()
         elif reg.name in DBG_REGNAMES:
