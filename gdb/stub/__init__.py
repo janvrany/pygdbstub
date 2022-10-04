@@ -1,8 +1,11 @@
 import enum
 import io
 import logging
+import os
 import sys
 from argparse import ArgumentParser
+from fcntl import F_GETFL, F_SETFL, fcntl
+from selectors import EVENT_READ, DefaultSelector
 from socket import SocketIO
 
 from gdb.stub.arch import PowerPC64
@@ -14,13 +17,18 @@ _logger = logging.getLogger(__name__)
 
 
 class IOPipe:
+    _logger = logging.getLogger(__name__ + ".io")
+    _logger.disabled = True  # disabled by default to reduce noise
+
     def __init__(
         self,
         _in=sys.stdin,
         _out=sys.stdout,
     ):
-        if isinstance(_in, io.RawIOBase):
+        if isinstance(_in, io.BufferedReader):
             self._in = io.TextIOWrapper(_in, "ascii")
+        elif isinstance(_in, io.RawIOBase):
+            self._in = io.TextIOWrapper(io.BufferedReader(_in, 256), "ascii")
         else:
             self._in = _in
         if isinstance(_out, io.RawIOBase):
@@ -28,22 +36,76 @@ class IOPipe:
         else:
             self._out = _out
 
+        # Check, if input stream is selectable...
+        try:
+            fd = _in.fileno()
+            # ...if so, make it non-blocking...
+            if hasattr(_in, "setblocking"):
+                _in.setblocking(False)
+            else:
+                flags = fcntl(_in, F_GETFL)
+                flags |= os.O_NONBLOCK
+                fcntl(_in, F_SETFL, flags)
+            # ...and setup selector object
+            self._selector = DefaultSelector()
+            self._selector.register(fd, EVENT_READ, None)
+        except OSError:
+            self._selector = None
+
     def write(self, buffer: str):
         self._out.write(buffer)
 
     def flush(self):
         self._out.flush()
 
-    def read(self, count: int) -> str | None:
+    @property
+    def closed(self):
+        return self._in.closed or self._out.closed
+
+    def readwait(self, timeout: float | None = None):
+        """
+        Block until some data are available. If the
+        input is not 'waitable' (like in-memory buffer),
+        return immediately.
+
+        If timeout is given (not None), raise `TimeoutError`
+        if no data are available before timeout expires.
+        """
+        if hasattr(self._in.buffer, "peek"):
+            if len(self._in.buffer.peek(1)) != 0:
+                self._logger.debug("readwait() done, data in buffer")
+                return
+
+        if self._selector is not None:
+            while True:
+                self._logger.debug("readwait() ...")
+                if self._in.closed:
+                    self._logger.debug("readwait() done, channel closed")
+                    return
+                events = self._selector.select(timeout)
+                if len(events) > 0:
+                    self._logger.debug("readwait() done, data available")
+                    return
+                if timeout:
+                    self._logger.debug("readwait() done, timed out!")
+                    raise TimeoutError("No data available")
+
+    def read(self, count: int, timeout: float | None = None) -> str | None:
         """
         Wait for and read `count` characters. Return `None`
         if there are no more data to read (peer closed the
         connection).
+
+        If timeout is given (not None), raise `TimeoutError`
+        if no data are available before timeout expires.
         """
-        data = self._in.read(count)
-        if data is None:
+        if self._in.closed:
             return None
-        elif len(data) == 0:
+        data = self._in.read(count)
+        if data is None or len(data) == 0:
+            self.readwait(timeout)
+            data = self._in.read(count)
+        if data is None or len(data) == 0:
             return None
         else:
             return data
@@ -142,9 +204,9 @@ class RSP(object):
         # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Overview
         self.send("")
 
-    def recv(self) -> str | None:
+    def recv(self, timeout: float | None = None) -> str | None:
         while True:
-            c = self._io.read(1)
+            c = self._io.read(1, timeout)
             if c is None:
                 # Client closed the connection
                 return None
