@@ -1,5 +1,6 @@
 import enum
 import io
+import logging
 import sys
 from argparse import ArgumentParser
 from socket import SocketIO
@@ -7,6 +8,9 @@ from socket import SocketIO
 from gdb.stub.arch import PowerPC64
 from gdb.stub.target import Null, Target
 from gdb.stub.target.microwatt import Microwatt
+
+logging.basicConfig()
+_logger = logging.getLogger(__name__)
 
 
 class IOPipe:
@@ -82,6 +86,8 @@ class RSP(object):
     escaping and checksuming.
     """
 
+    _logger = logging.getLogger(__name__ + ".rsp")
+
     def __init__(self, channel=IOPipe()):
         self._io = channel
 
@@ -122,6 +128,7 @@ class RSP(object):
         self._io.write("#")
         self._io.write("%02x" % csum)
         self._io.flush()
+        self._logger.debug("send: " + data)
         assert self.recv_ack()
 
     def send_unsupported(self):
@@ -155,6 +162,7 @@ class RSP(object):
                 #    an unescaped 0x03 as part of its packet.
                 #
                 # See https://sourceware.org/gdb/current/onlinedocs/gdb/Interrupts.html#interrupting-remote-targets
+                self._logger.debug("recv Ctrl-C")
                 return c
             elif c == "$":
                 break
@@ -199,6 +207,7 @@ class RSP(object):
             csum == buffer_csum
         ), f"Checksums do not match (sent: {hex(csum)}, recv'd: {hex(buffer_csum)})"
         self.send_ack()
+        self._logger.debug("recv: " + buffer.getvalue())
         return buffer.getvalue()
 
 
@@ -558,6 +567,7 @@ def main(argv=sys.argv):
 
         sys.excepthook = excepthook
         sys.breakpointhook = breakpointhook
+        _logger.setLevel(logging.DEBUG)
     if args.board is not None:
         import gdb.stub.boards
 
@@ -573,6 +583,11 @@ def main(argv=sys.argv):
         #
         # Use stdin/stdout for communication.
         #
+        # Here we disable logging altogether otherwise log messages
+        # would go to stdout/stderr which is used for RSP
+        # communication - we do not want that
+        _logger.disabled = True
+        _logger.propagate = False
         stub = Stub(target)
         stub.start()
     else:
@@ -586,16 +601,18 @@ def main(argv=sys.argv):
         try:
 
             listener.bind(("localhost", args.port))
-            print(f"Listening on localhost:{args.port}")
+            _logger.info(f"Listening on localhost:{args.port}")
             listener.listen(1)
         except error as e:
-            print(f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}")
+            _logger.error(
+                f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}"
+            )
         client, addr = listener.accept()
 
         # Once client connects, stop listening and
         # start stub on client socket
         try:
-            print(f"Client connected from {addr[0]}:{addr[1]}")
+            _logger.info(f"Client connected from {addr[0]}:{addr[1]}")
             listener.close()
             client_io = SocketIO(client, "rw")
             try:
@@ -604,4 +621,6 @@ def main(argv=sys.argv):
             finally:
                 client_io.close()
         except error as e:
-            print(f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}")
+            _logger.error(
+                f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}"
+            )
