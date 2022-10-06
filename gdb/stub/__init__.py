@@ -364,6 +364,21 @@ class Stub(object):
 
         Called whenever there are no packets available for some time.
         """
+
+        if self._target.has_swbreak():
+            if self._target.hit_swbreak():
+                # Here we simply report `S05` and not `T05swbreak` because we
+                # do not support qSupported yet and therefore could not report
+                # to GDB we support swbreak:
+                #
+                #   This packet should not be sent by default; older GDB versions
+                #   did not support it. GDB requests it, by supplying an
+                #   appropriate ‘qSupported’ feature (see qSupported). The
+                #   remote stub must also supply the appropriate ‘qSupported’
+                #   feature indicating support.
+                #
+                # See https://sourceware.org/gdb/current/onlinedocs/gdb/Stop-Reply-Packets.html#Stop-Reply-Packets
+                self._rsp.send("S%02x" % TARGET_SIGNAL.TRAP)
         pass
 
     def handle_q(self, packet):
@@ -614,6 +629,47 @@ class Stub(object):
         self._target.flush()
         self._target.reset()
         self._rsp.send("S00")
+
+    def handle_z(self, packet):
+        self.handle_zZ(packet)
+
+    def handle_Z(self, packet):
+        self.handle_zZ(packet)
+
+    def handle_zZ(self, packet):
+        """
+        `z type,addr,kind`
+        `Z type,addr,kind`
+
+        Insert (`Z`) or remove (`z`) a type breakpoint or watchpoint starting at
+        address `addr` of kind `kind`.
+
+        Each breakpoint and watchpoint packet type is documented separately, see
+        https://sourceware.org/gdb/current/onlinedocs/gdb/Packets.html#Packets
+
+        Implementation notes: A remote target shall return an empty string for
+        an unrecognized breakpoint or watchpoint packet type. A remote target
+        shall support either both or neither of a given `Ztype…` and `ztype…`
+        packet pair. To avoid potential problems with duplicate packets, the
+        operations should be implemented in an idempotent way.
+        """
+        if not self._target.has_swbreak():
+            self._rsp.send_unsupported()
+            return
+
+        type, addr, kind = packet[1:].split(",")
+        addr = int(addr, 16)
+        kind = int(kind, 16)
+        if packet[0] == "Z":
+            if type == "0":
+                self._target.set_swbreak(addr, kind)
+                self._rsp.send("OK")
+        elif packet[0] == "z":
+            if type == "0":
+                self._target.del_swbreak(addr, kind)
+                self._rsp.send("OK")
+        else:
+            self._rsp.send_unsupported()
 
 
 def main(argv=sys.argv):
