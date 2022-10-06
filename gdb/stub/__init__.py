@@ -292,6 +292,9 @@ class TARGET_SIGNAL(enum.IntEnum):
 
 
 class Stub(object):
+    _logger = logging.getLogger(__name__)
+    _poll_interval = 0.5  # seconds
+
     def __init__(self, target: Target, channel: IOPipe = IOPipe()):
         self._target = target
         self._rsp = RSP(channel)
@@ -317,16 +320,20 @@ class Stub(object):
         with self:
             self._target.flush()
             self._target.stop()
-            while self.process1():
-                pass
+            while True:
+                try:
+                    if not self.process1(self._poll_interval):
+                        return
+                except TimeoutError:
+                    self.check_target()
 
-    def process1(self) -> bool:
+    def process1(self, timeout: float | None = None) -> bool:
         """
         Wait for and process single packet. Return `True` if packet
         was processed (even if there was an error processing it),
         `False` if there were no more packets (connection closed)
         """
-        packet = self._rsp.recv()
+        packet = self._rsp.recv(timeout)
         if packet is None:
             return False
         packet_type = packet[0]
@@ -348,6 +355,16 @@ class Stub(object):
             # Error when processing the packet
             self._rsp.send("EF1")
         return True
+
+    def check_target(self):
+        """
+        Check for any changes in target (like target spuriously resumed, target
+        stopped on swbreakpoint, died and so on). Report (stop) event (if any)
+        back to GDB.
+
+        Called whenever there are no packets available for some time.
+        """
+        pass
 
     def handle_q(self, packet):
         if packet.startswith("qSupported"):
