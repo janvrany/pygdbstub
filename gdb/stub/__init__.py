@@ -465,6 +465,7 @@ class Stub(object):
         length, data = length_and_data.split(":")
         self._target.memory_write(int(addr, 16), int(length, 10), hex2bytes(data))
         self._rsp.send("OK")
+
     def handle_etx(self, packet):
         # Ctrl-C was pressed in GDB. Stop the target...
         self._target.flush()
@@ -529,13 +530,14 @@ class Stub(object):
 
 def main(argv=sys.argv):
     targets = {
-        "null-ppc64le": lambda: Null(PowerPC64()),
-        "microwatt": lambda: Microwatt(),
+        "null-ppc64le": lambda *params: Null(PowerPC64(*params)),
+        "microwatt": lambda *params: Microwatt(*params),
     }
     parser = ArgumentParser(description=main.__doc__)
     parser.add_argument(
         "-t", "--target", choices=list(targets.keys()), help="Target to connect to."
     )
+    parser.add_argument("-b", "--board", type=str, help="Board to connect to")
     parser.add_argument(
         "-p",
         "--port",
@@ -556,7 +558,17 @@ def main(argv=sys.argv):
 
         sys.excepthook = excepthook
         sys.breakpointhook = breakpointhook
-    target = targets[args.target]()
+    if args.board is not None:
+        import gdb.stub.boards
+
+        try:
+            board = getattr(gdb.stub.boards, args.board)
+        except AttributeError:
+            print(f"No such board defined: {args.board}")
+            return 1
+        target = targets[args.target](board())
+    else:
+        target = targets[args.target]()
     if args.port is None:
         #
         # Use stdin/stdout for communication.

@@ -33,11 +33,11 @@ pipenv run pre-commit install -t pre-push
 ### Using TCP port
 
 ```
-.venv/bin/python -m gdb.stub -t microwatt -p 7000
+.venv/bin/python -m gdb.stub -t microwatt -b Genesys2 -p 7000
 ```
 
 * run *pygdbstub* (`-m gdb.stub`)
-* connect to Microwatt on Arty FPGA (`-t microwatt`)
+* connect to Microwatt on Digilent Genesys2 FPGA boatd (`-t microwatt -b Genesys2`)
 * listen on localhost, port 7000 (`-p 7000`)
 
 Then in GDB, connect to stub like:
@@ -55,7 +55,7 @@ Then in GDB, connect to stub like:
 ```
 
 * run *pygdbstub* (`-m gdb.stub`)
-* connect to Microwatt on Arty FPGA (`-t microwatt`)
+* connect to Microwatt on Arty FPGA (`-t microwatt`, Arty is default board for Microwatt target)
 * use stdio to communicate with GDB (default)
 
 ## Debugging communication

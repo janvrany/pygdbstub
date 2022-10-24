@@ -2,9 +2,8 @@ import enum
 import struct
 from typing import TextIO
 
-import urjtag
-
 from ..arch import PowerPC64
+from ..boards import Arty
 from . import Target
 
 
@@ -95,6 +94,9 @@ def round_down(value: int, boundary_in_bytes: int = 8):
 
 class Microwatt(Target):
     class Debug(object):
+        def __init__(self):
+            self._urc = None
+
         def __enter__(self):
             self.connect()
             return self
@@ -105,9 +107,8 @@ class Microwatt(Target):
         def __del__(self):
             self.disconnect()
 
-        def connect(self):
-            self._urc = urjtag.chain()
-            self._urc.cable("DigilentNexysVideo")  # FIXME: magic constant!
+        def connect(self, board=Arty()):
+            self._urc = board.chain()
 
             # from bscane2_init()
             self._urc.addpart(6)
@@ -219,14 +220,15 @@ class Microwatt(Target):
         def creset(self):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_RESET)
 
-    def __init__(self):
+    def __init__(self, board=Arty()):
         self._cpustate = PowerPC64()
+        self._board = board
         self._jtag = None
 
     def connect(self):
         if self._jtag is None:
             self._jtag = Microwatt.Debug()
-            self._jtag.connect()
+            self._jtag.connect(self._board)
 
     def disconnect(self):
         if self._jtag is not None:
