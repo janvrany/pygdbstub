@@ -1,22 +1,34 @@
 import enum
 import io
+import logging
+import os
 import sys
 from argparse import ArgumentParser
+from fcntl import F_GETFL, F_SETFL, fcntl
+from selectors import EVENT_READ, DefaultSelector
 from socket import SocketIO
 
 from gdb.stub.arch import PowerPC64
 from gdb.stub.target import Null, Target
 from gdb.stub.target.microwatt import Microwatt
 
+logging.basicConfig()
+_logger = logging.getLogger(__name__)
+
 
 class IOPipe:
+    _logger = logging.getLogger(__name__ + ".io")
+    _logger.disabled = True  # disabled by default to reduce noise
+
     def __init__(
         self,
         _in=sys.stdin,
         _out=sys.stdout,
     ):
-        if isinstance(_in, io.RawIOBase):
+        if isinstance(_in, io.BufferedReader):
             self._in = io.TextIOWrapper(_in, "ascii")
+        elif isinstance(_in, io.RawIOBase):
+            self._in = io.TextIOWrapper(io.BufferedReader(_in, 256), "ascii")
         else:
             self._in = _in
         if isinstance(_out, io.RawIOBase):
@@ -24,22 +36,76 @@ class IOPipe:
         else:
             self._out = _out
 
+        # Check, if input stream is selectable...
+        try:
+            fd = _in.fileno()
+            # ...if so, make it non-blocking...
+            if hasattr(_in, "setblocking"):
+                _in.setblocking(False)
+            else:
+                flags = fcntl(_in, F_GETFL)
+                flags |= os.O_NONBLOCK
+                fcntl(_in, F_SETFL, flags)
+            # ...and setup selector object
+            self._selector = DefaultSelector()
+            self._selector.register(fd, EVENT_READ, None)
+        except OSError:
+            self._selector = None
+
     def write(self, buffer: str):
         self._out.write(buffer)
 
     def flush(self):
         self._out.flush()
 
-    def read(self, count: int) -> str | None:
+    @property
+    def closed(self):
+        return self._in.closed or self._out.closed
+
+    def readwait(self, timeout: float | None = None):
+        """
+        Block until some data are available. If the
+        input is not 'waitable' (like in-memory buffer),
+        return immediately.
+
+        If timeout is given (not None), raise `TimeoutError`
+        if no data are available before timeout expires.
+        """
+        if hasattr(self._in.buffer, "peek"):
+            if len(self._in.buffer.peek(1)) != 0:
+                self._logger.debug("readwait() done, data in buffer")
+                return
+
+        if self._selector is not None:
+            while True:
+                self._logger.debug("readwait() ...")
+                if self._in.closed:
+                    self._logger.debug("readwait() done, channel closed")
+                    return
+                events = self._selector.select(timeout)
+                if len(events) > 0:
+                    self._logger.debug("readwait() done, data available")
+                    return
+                if timeout:
+                    self._logger.debug("readwait() done, timed out!")
+                    raise TimeoutError("No data available")
+
+    def read(self, count: int, timeout: float | None = None) -> str | None:
         """
         Wait for and read `count` characters. Return `None`
         if there are no more data to read (peer closed the
         connection).
+
+        If timeout is given (not None), raise `TimeoutError`
+        if no data are available before timeout expires.
         """
-        data = self._in.read(count)
-        if data is None:
+        if self._in.closed:
             return None
-        elif len(data) == 0:
+        data = self._in.read(count)
+        if data is None or len(data) == 0:
+            self.readwait(timeout)
+            data = self._in.read(count)
+        if data is None or len(data) == 0:
             return None
         else:
             return data
@@ -82,6 +148,8 @@ class RSP(object):
     escaping and checksuming.
     """
 
+    _logger = logging.getLogger(__name__ + ".rsp")
+
     def __init__(self, channel=IOPipe()):
         self._io = channel
 
@@ -122,6 +190,7 @@ class RSP(object):
         self._io.write("#")
         self._io.write("%02x" % csum)
         self._io.flush()
+        self._logger.debug("send: " + data)
         assert self.recv_ack()
 
     def send_unsupported(self):
@@ -135,9 +204,9 @@ class RSP(object):
         # See https://sourceware.org/gdb/current/onlinedocs/gdb/Overview.html#Overview
         self.send("")
 
-    def recv(self) -> str | None:
+    def recv(self, timeout: float | None = None) -> str | None:
         while True:
-            c = self._io.read(1)
+            c = self._io.read(1, timeout)
             if c is None:
                 # Client closed the connection
                 return None
@@ -155,6 +224,7 @@ class RSP(object):
                 #    an unescaped 0x03 as part of its packet.
                 #
                 # See https://sourceware.org/gdb/current/onlinedocs/gdb/Interrupts.html#interrupting-remote-targets
+                self._logger.debug("recv Ctrl-C")
                 return c
             elif c == "$":
                 break
@@ -199,6 +269,7 @@ class RSP(object):
             csum == buffer_csum
         ), f"Checksums do not match (sent: {hex(csum)}, recv'd: {hex(buffer_csum)})"
         self.send_ack()
+        self._logger.debug("recv: " + buffer.getvalue())
         return buffer.getvalue()
 
 
@@ -221,6 +292,9 @@ class TARGET_SIGNAL(enum.IntEnum):
 
 
 class Stub(object):
+    _logger = logging.getLogger(__name__)
+    _poll_interval = 0.5  # seconds
+
     def __init__(self, target: Target, channel: IOPipe = IOPipe()):
         self._target = target
         self._rsp = RSP(channel)
@@ -246,16 +320,20 @@ class Stub(object):
         with self:
             self._target.flush()
             self._target.stop()
-            while self.process1():
-                pass
+            while True:
+                try:
+                    if not self.process1(self._poll_interval):
+                        return
+                except TimeoutError:
+                    self.check_target()
 
-    def process1(self) -> bool:
+    def process1(self, timeout: float | None = None) -> bool:
         """
         Wait for and process single packet. Return `True` if packet
         was processed (even if there was an error processing it),
         `False` if there were no more packets (connection closed)
         """
-        packet = self._rsp.recv()
+        packet = self._rsp.recv(timeout)
         if packet is None:
             return False
         packet_type = packet[0]
@@ -277,6 +355,31 @@ class Stub(object):
             # Error when processing the packet
             self._rsp.send("EF1")
         return True
+
+    def check_target(self):
+        """
+        Check for any changes in target (like target spuriously resumed, target
+        stopped on swbreakpoint, died and so on). Report (stop) event (if any)
+        back to GDB.
+
+        Called whenever there are no packets available for some time.
+        """
+
+        if self._target.has_swbreak():
+            if self._target.hit_swbreak():
+                # Here we simply report `S05` and not `T05swbreak` because we
+                # do not support qSupported yet and therefore could not report
+                # to GDB we support swbreak:
+                #
+                #   This packet should not be sent by default; older GDB versions
+                #   did not support it. GDB requests it, by supplying an
+                #   appropriate ‘qSupported’ feature (see qSupported). The
+                #   remote stub must also supply the appropriate ‘qSupported’
+                #   feature indicating support.
+                #
+                # See https://sourceware.org/gdb/current/onlinedocs/gdb/Stop-Reply-Packets.html#Stop-Reply-Packets
+                self._rsp.send("S%02x" % TARGET_SIGNAL.TRAP)
+        pass
 
     def handle_q(self, packet):
         if packet.startswith("qSupported"):
@@ -527,6 +630,47 @@ class Stub(object):
         self._target.reset()
         self._rsp.send("S00")
 
+    def handle_z(self, packet):
+        self.handle_zZ(packet)
+
+    def handle_Z(self, packet):
+        self.handle_zZ(packet)
+
+    def handle_zZ(self, packet):
+        """
+        `z type,addr,kind`
+        `Z type,addr,kind`
+
+        Insert (`Z`) or remove (`z`) a type breakpoint or watchpoint starting at
+        address `addr` of kind `kind`.
+
+        Each breakpoint and watchpoint packet type is documented separately, see
+        https://sourceware.org/gdb/current/onlinedocs/gdb/Packets.html#Packets
+
+        Implementation notes: A remote target shall return an empty string for
+        an unrecognized breakpoint or watchpoint packet type. A remote target
+        shall support either both or neither of a given `Ztype…` and `ztype…`
+        packet pair. To avoid potential problems with duplicate packets, the
+        operations should be implemented in an idempotent way.
+        """
+        if not self._target.has_swbreak():
+            self._rsp.send_unsupported()
+            return
+
+        type, addr, kind = packet[1:].split(",")
+        addr = int(addr, 16)
+        kind = int(kind, 16)
+        if packet[0] == "Z":
+            if type == "0":
+                self._target.set_swbreak(addr, kind)
+                self._rsp.send("OK")
+        elif packet[0] == "z":
+            if type == "0":
+                self._target.del_swbreak(addr, kind)
+                self._rsp.send("OK")
+        else:
+            self._rsp.send_unsupported()
+
 
 def main(argv=sys.argv):
     targets = {
@@ -558,6 +702,7 @@ def main(argv=sys.argv):
 
         sys.excepthook = excepthook
         sys.breakpointhook = breakpointhook
+        _logger.setLevel(logging.DEBUG)
     if args.board is not None:
         import gdb.stub.boards
 
@@ -573,6 +718,11 @@ def main(argv=sys.argv):
         #
         # Use stdin/stdout for communication.
         #
+        # Here we disable logging altogether otherwise log messages
+        # would go to stdout/stderr which is used for RSP
+        # communication - we do not want that
+        _logger.disabled = True
+        _logger.propagate = False
         stub = Stub(target)
         stub.start()
     else:
@@ -586,16 +736,18 @@ def main(argv=sys.argv):
         try:
 
             listener.bind(("localhost", args.port))
-            print(f"Listening on localhost:{args.port}")
+            _logger.info(f"Listening on localhost:{args.port}")
             listener.listen(1)
         except error as e:
-            print(f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}")
+            _logger.error(
+                f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}"
+            )
         client, addr = listener.accept()
 
         # Once client connects, stop listening and
         # start stub on client socket
         try:
-            print(f"Client connected from {addr[0]}:{addr[1]}")
+            _logger.info(f"Client connected from {addr[0]}:{addr[1]}")
             listener.close()
             client_io = SocketIO(client, "rw")
             try:
@@ -604,4 +756,6 @@ def main(argv=sys.argv):
             finally:
                 client_io.close()
         except error as e:
-            print(f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}")
+            _logger.error(
+                f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}"
+            )

@@ -141,6 +141,7 @@ class Microwatt(Target):
             while True:
                 rc, data = self.command(0, 0)
                 if rc == 0:
+                    assert 0 <= data and data <= 0xFFFF_FFFF_FFFF_FFFF
                     return data
                 elif rc != 3:
                     raise Exception("Unknown status code %d!" % rc)
@@ -221,6 +222,7 @@ class Microwatt(Target):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_RESET)
 
     def __init__(self, board=Arty()):
+        super().__init__()
         self._cpustate = PowerPC64()
         self._board = board
         self._jtag = None
@@ -264,7 +266,10 @@ class Microwatt(Target):
         buf_hi = buf_lo + length
         return buf[buf_lo:buf_hi]
 
-    def memory_write(self, addr: int, length: int, data: bytes) -> None:
+    def memory_write(self, addr: int, data: bytes, length: int = None) -> None:
+        if length is None:
+            length = len(data)
+
         buflen = round_up(addr + length) - round_down(addr)
         buf = bytearray(buflen)
         buf_lo = addr - round_down(addr)
@@ -342,3 +347,23 @@ class Microwatt(Target):
         msr = self._jtag.register_read_msr()
         response.write("Core: %s\n NIA: %016x\n MSR: %016x\n" % (status, nia, msr))
         return True
+
+    #
+    # Software breakpoint support
+    #
+    SWBREAK_INSN = b"\x00\x00\x00\x48"
+
+    def has_swbreak(self) -> bool:
+        return True
+
+    def hit_swbreak(self) -> bool:
+        """
+        Return true, if target hit one of the ss breakpoints
+        """
+        if self._jtag.status() == 0:  # is it running?
+            nia = self._jtag.register_read_nia()
+            if nia in self._sw_breakpoints:
+                self._cpustate.registers.flush()
+                self.stop()
+                return True
+        return False
