@@ -1,7 +1,7 @@
 import logging
 from typing import TextIO
 
-from gdb.stub.arch import Arch
+from ..arch import Arch
 
 
 class Target(object):

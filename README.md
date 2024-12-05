@@ -33,10 +33,10 @@ pre-commit install -t pre-push
 ### Using TCP port
 
 ```
-.venv/bin/python -m gdb.stub -t microwatt -b Genesys2 -p 7000
+.venv/bin/python -m pygdbstub -t microwatt -b Genesys2 -p 7000
 ```
 
-* run *pygdbstub* (`-m gdb.stub`)
+* run *pygdbstub* (`-m pygdbstub`)
 * connect to Microwatt on Digilent Genesys2 FPGA boatd (`-t microwatt -b Genesys2`)
 * listen on localhost, port 7000 (`-p 7000`)
 
@@ -51,10 +51,10 @@ Then in GDB, connect to stub like:
 
 ```
 (gdb) set arch powerpc:common64
-(gdb) target remote | .venv/bin/python -m gdb.stub -t microwatt
+(gdb) target remote | .venv/bin/python -m pygdbstub -t microwatt
 ```
 
-* run *pygdbstub* (`-m gdb.stub`)
+* run *pygdbstub* (`-m pygdbstub`)
 * connect to Microwatt on Arty FPGA (`-t microwatt`, Arty is default board for Microwatt target)
 * use stdio to communicate with GDB (default)
 
@@ -82,7 +82,7 @@ Some hints to help debugging communication between GDB and pygdbstub:
    stub using `socat`:
 
    ```
-   socat -v tcp4-listen:7007,reuseaddr,fork 'exec:python3 -m gdb.stub'
+   socat -v tcp4-listen:7007,reuseaddr,fork 'exec:python3 -m pygdbstub'
    ```
 
    and then in GDB, connect to port 7007:
