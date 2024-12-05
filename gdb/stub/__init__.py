@@ -8,9 +8,7 @@ from fcntl import F_GETFL, F_SETFL, fcntl
 from selectors import EVENT_READ, DefaultSelector
 from socket import SocketIO
 
-from gdb.stub.arch import PowerPC64
-from gdb.stub.target import Null, Target
-from gdb.stub.target.microwatt import Microwatt
+from gdb.stub.target import Target
 
 logging.basicConfig()
 _logger = logging.getLogger(__name__)
@@ -685,6 +683,10 @@ class Stub(object):
 
 
 def main(argv=sys.argv):
+    from gdb.stub.arch import PowerPC64
+    from gdb.stub.target import Null
+    from gdb.stub.target.microwatt import Microwatt
+
     targets = {
         "null-ppc64le": lambda *params: Null(PowerPC64(*params)),
         "microwatt": lambda *params: Microwatt(*params),
