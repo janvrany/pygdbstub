@@ -149,6 +149,7 @@ class Target(object):
 
 class Null(Target):
     def __init__(self, cpu_state: Arch):
+        super().__init__()
         self._cpustate = cpu_state
 
     def connect(self):
