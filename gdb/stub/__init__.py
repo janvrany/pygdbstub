@@ -549,7 +549,7 @@ class Stub(object):
             * `E NN` NN is errno
         """
         addr, length = packet[1:].split(",")
-        reply = self._target.memory_read(int(addr, 16), int(length, 10))
+        reply = self._target.memory_read(int(addr, 16), int(length, 16))
         reply = bytes2hex(reply)
         self._rsp.send(reply)
 
@@ -566,7 +566,7 @@ class Stub(object):
         """
         addr, length_and_data = packet[1:].split(",")
         length, data = length_and_data.split(":")
-        self._target.memory_write(int(addr, 16), int(length, 10), hex2bytes(data))
+        self._target.memory_write(int(addr, 16), int(length, 16), hex2bytes(data))
         self._rsp.send("OK")
 
     def handle_etx(self, packet):
