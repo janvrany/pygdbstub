@@ -549,7 +549,7 @@ class Stub(object):
             * `E NN` NN is errno
         """
         addr, length = packet[1:].split(",")
-        reply = self._target.memory_read(int(addr, 16), int(length, 10))
+        reply = self._target.memory_read(int(addr, 16), int(length, 16))
         reply = bytes2hex(reply)
         self._rsp.send(reply)
 
