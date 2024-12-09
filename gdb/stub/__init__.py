@@ -3,6 +3,7 @@ import io
 import logging
 import os
 import sys
+import traceback
 from argparse import ArgumentParser
 from fcntl import F_GETFL, F_SETFL, fcntl
 from selectors import EVENT_READ, DefaultSelector
@@ -349,9 +350,12 @@ class Stub(object):
                 return True
         try:
             handler(packet)
-        except Exception:
+        except Exception as e:
             # Error when processing the packet
             self._rsp.send("EF1")
+            _logger.error(
+                f"Error processing packet{packet}: {e}\n {traceback.format_exc()}"
+            )
         return True
 
     def check_target(self):
@@ -447,8 +451,11 @@ class Stub(object):
                         self._rsp.send(string2hex(*[response.getvalue()]))
                 else:
                     self._rsp.send("EF0")
-            except Exception:
+            except Exception as e:
                 self._rsp.send("EF1")
+                _logger.error(
+                    f"Error processing packet{packet}: {e}\n {traceback.format_exc()}"
+                )
         else:
             self._rsp.send_unsupported()
 
