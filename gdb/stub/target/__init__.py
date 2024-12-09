@@ -6,6 +6,7 @@ from gdb.stub.arch import Arch
 
 class Target(object):
     _logger = logging.getLogger(__name__)
+    _cpustate: Arch
 
     #
     # Methods that must be implemented by individual targets
@@ -23,6 +24,9 @@ class Target(object):
         raise Exception("Should be implemented!")
 
     def memory_write(self, address: int, data: bytes, length: int = None) -> None:
+        raise Exception("Should be implemented!")
+
+    def register_write(self, regnum: int, data: bytes) -> None:
         raise Exception("Should be implemented!")
 
     def stop(self):
@@ -163,6 +167,9 @@ class Null(Target):
 
     def register_read(self, regnum: int) -> bytes:
         return self._cpustate.registers[regnum].get_bytes()
+
+    def register_write(self, regnum, data):
+        pass
 
     def memory_write(self, address: int, data: bytes, length: int = None) -> None:
         pass

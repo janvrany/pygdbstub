@@ -255,6 +255,9 @@ class Microwatt(Target):
         value = value[0 : reg.size // 8]
         return value
 
+    def register_write(self, regnum, data):
+        raise Exception("Should be implemented!")
+
     def memory_read(self, addr: int, length: int) -> bytes:
         buflen = round_up(addr + length) - round_down(addr)
         buf = bytearray(buflen)
