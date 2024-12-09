@@ -529,6 +529,18 @@ class Stub(object):
         reply = bytes2hex(*[bytes(reg) for reg in self._target.registers])
         self._rsp.send(reply)
 
+    def handle_P(self, packet):
+        """
+        Write register n… with value r…. The register number n is in hexadecimal, and r… contains two hex digits for each byte in the register (target byte order).
+        E.g.
+        Pf=34120000
+        """
+        regnum, value = packet[1:].split("=")
+        regnum = int(regnum, 16)
+        value = hex2bytes(value)
+        self._target.register_write(regnum, value)
+        self._rsp.send("OK")
+
     def handle_m(self, packet):
         """
         `m addr,length`
