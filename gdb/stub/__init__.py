@@ -684,6 +684,45 @@ class Stub(object):
             self._rsp.send_unsupported()
 
 
+class SocketIOStub(Stub):
+    def __init__(self, target: Target, port: int = 1234):
+        import socket
+
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # Wait for client to connect...
+        try:
+            listener.bind(("localhost", port))
+            self._logger.info(f"Listening on localhost:{port}")
+            listener.listen(1)
+        except socket.error as e:
+            self._logger.error(
+                f"Cannot listen on localhost:{port}: error {e[0]} - {e[1]}"
+            )
+
+        client, addr = listener.accept()
+
+        # Once client connects, stop listening and
+        # start stub on client socket
+        try:
+            self._logger.info(f"Client connected from {addr[0]}:{addr[1]}")
+            listener.close()
+            client_io = socket.SocketIO(client, "rw")
+            super().__init__(target, IOPipe(client_io, client_io))
+            self.client_io = client_io
+        except socket.error as e:
+            self._logger.error(
+                f"Failed to handle client: {port}: error {e[0]} - {e[1]}"
+            )
+
+    def start(self):
+        try:
+            super().start()
+        finally:
+            self.client_io.close()
+        _logger.info("Stub thread stopped")
+
+
 def main(argv=sys.argv):
     targets = {
         "null-ppc64le": lambda *params: Null(PowerPC64(*params)),
@@ -715,6 +754,7 @@ def main(argv=sys.argv):
         sys.excepthook = excepthook
         sys.breakpointhook = breakpointhook
         _logger.setLevel(logging.DEBUG)
+
     if args.board is not None:
         import gdb.stub.boards
 
@@ -726,6 +766,7 @@ def main(argv=sys.argv):
         target = targets[args.target](board())
     else:
         target = targets[args.target]()
+
     if args.port is None:
         #
         # Use stdin/stdout for communication.
@@ -736,38 +777,7 @@ def main(argv=sys.argv):
         _logger.disabled = True
         _logger.propagate = False
         stub = Stub(target)
-        stub.start()
     else:
-        #
-        # Listen on TCP port
-        #
-        from socket import AF_INET, SOCK_STREAM, error, socket
+        stub = SocketIOStub(target, args.port)
 
-        listener = socket(AF_INET, SOCK_STREAM)
-        # Wait for client to connect...
-        try:
-
-            listener.bind(("localhost", args.port))
-            _logger.info(f"Listening on localhost:{args.port}")
-            listener.listen(1)
-        except error as e:
-            _logger.error(
-                f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}"
-            )
-        client, addr = listener.accept()
-
-        # Once client connects, stop listening and
-        # start stub on client socket
-        try:
-            _logger.info(f"Client connected from {addr[0]}:{addr[1]}")
-            listener.close()
-            client_io = SocketIO(client, "rw")
-            try:
-                stub = Stub(target, IOPipe(client_io, client_io))
-                stub.start()
-            finally:
-                client_io.close()
-        except error as e:
-            _logger.error(
-                f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}"
-            )
+    stub.start()
