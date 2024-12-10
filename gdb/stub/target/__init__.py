@@ -1,5 +1,5 @@
 import logging
-from typing import TextIO
+from typing import TextIO, List
 
 from gdb.stub.arch import Arch
 
@@ -152,9 +152,26 @@ class Target(object):
 
 
 class Null(Target):
+    """A null target that can accept any memories and registers written to it."""
+
+    class RawMemory:
+        def __init__(self, address: int, data: bytearray):
+            self.address = address
+            self.data = data
+
+        def __str__(self):
+            return f"({self.address:#x}~{self.address + len(self.data):#x})"
+
+        def __repr__(self):
+            return self.__str__()
+
+        def __len__(self):
+            return len(self.data)
+
     def __init__(self, cpu_state: Arch):
         super().__init__()
         self._cpustate = cpu_state
+        self.memories: List[self.RawMemory] = []  # List of memory regions
 
     def connect(self):
         pass
@@ -163,16 +180,59 @@ class Null(Target):
         pass
 
     def memory_read(self, address: int, length: int) -> bytes:
-        return bytes(length)
+        for mem in self.memories:
+            if mem.address <= address < mem.address + len(mem):
+                offset = address - mem.address
+                # Limit the length to available data
+                length = min(length, len(mem) - offset)
+                return mem.data[offset : offset + length]
+        return b""
+
+    def memory_write(self, address, data, length=None):
+        data = data[:length] if length else data
+        memories = self.memories
+
+        mem = self.RawMemory(address, bytearray(data))
+        self._logger.debug(f"Write: {mem}")
+
+        if not memories or address > memories[-1].address + len(memories[-1]):
+            memories.append(mem)  # New memory region in the end
+            return
+        elif address + len(data) < memories[0].address:
+            memories.insert(0, mem)  # New memory region in the beginning
+            return
+
+        for i, m in enumerate(memories):
+            if address > m.address + len(m):
+                continue
+
+            if address + len(data) < m.address:
+                memories.insert(i, mem)  # New memory region in the middle
+                return
+
+            if (offset := address - m.address) >= 0:
+                # Overwrite and appned data to existing memory
+                m.data[offset : offset + len(data)] = data
+            else:
+                # Prepend data to existing memory
+                offset = address + len(m) - m.address
+                m.data = data + m.data[offset:]
+                m.address = address
+
+            # Remove overlapping memory regions
+            end = m.address + len(m)
+            for m2 in memories[i + 1 :]:
+                if end < m2.address:
+                    break
+
+                memories.remove(m2)
+                m.data += m2.data[end - m2.address :]
 
     def register_read(self, regnum: int) -> bytes:
         return self._cpustate.registers[regnum].get_bytes()
 
     def register_write(self, regnum, data):
-        pass
-
-    def memory_write(self, address: int, data: bytes, length: int = None) -> None:
-        pass
+        self._cpustate.registers[regnum].set_bytes(data)
 
     def stop(self):
         pass
