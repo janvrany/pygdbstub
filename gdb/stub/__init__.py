@@ -566,7 +566,7 @@ class Stub(object):
         """
         addr, length_and_data = packet[1:].split(",")
         length, data = length_and_data.split(":")
-        self._target.memory_write(int(addr, 16), int(length, 16), hex2bytes(data))
+        self._target.memory_write(int(addr, 16), hex2bytes(data), int(length, 16))
         self._rsp.send("OK")
 
     def handle_etx(self, packet):
