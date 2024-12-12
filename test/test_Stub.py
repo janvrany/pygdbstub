@@ -1,8 +1,8 @@
 from io import StringIO
 
-from gdb.stub import IOPipe, Stub
-from gdb.stub.arch import PowerPC64
-from gdb.stub.target import Null
+from pygdbstub import IOPipe, Stub
+from pygdbstub.arch import PowerPC64
+from pygdbstub.target import Null
 
 target = Null(PowerPC64())
 

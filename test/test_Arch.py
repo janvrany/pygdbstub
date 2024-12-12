@@ -1,4 +1,4 @@
-from gdb.stub.arch import PowerPC64
+from pygdbstub.arch import PowerPC64
 
 
 def test_PowerPC64() -> None:

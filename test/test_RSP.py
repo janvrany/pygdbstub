@@ -1,6 +1,6 @@
 from io import StringIO
 
-from gdb.stub import RSP, IOPipe
+from pygdbstub import RSP, IOPipe
 
 
 def test_send_01() -> None:

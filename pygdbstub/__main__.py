@@ -1,5 +1,5 @@
 from sys import argv
 
-from gdb.stub import main
+from . import main
 
 main(argv)
