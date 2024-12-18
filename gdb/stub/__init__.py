@@ -445,7 +445,7 @@ class Stub(object):
                 if handled is None:
                     self._rsp.send_unsupported()
                 elif handled is True:
-                    if response.getvalue() is None:
+                    if not response.getvalue():
                         self._rsp.send("OK")
                     else:
                         self._rsp.send(string2hex(*[response.getvalue()]))
