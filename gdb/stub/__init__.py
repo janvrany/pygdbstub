@@ -690,6 +690,13 @@ class SocketIOStub(Stub):
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+        # Reuse address so we don't have to wait for socket to be
+        # close before we can bind to the port again
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # No delay in sending packets, to speed up communication
+        listener.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
         # Wait for client to connect...
         try:
             listener.bind(("localhost", port))
