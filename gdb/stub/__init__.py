@@ -167,31 +167,17 @@ class IOPipe:
             return data
 
 
-Bytes2HexMap = ["%02x" % x for x in range(256)]
-
-
 def bytes2hex(*data: bytes) -> str:
-    hex = io.StringIO()
-    for datum in data:
-        for b in datum:
-            hex.write(Bytes2HexMap[b])
-    return hex.getvalue()
+    return "".join([datum.hex() for datum in data])
 
 
 def string2hex(*data: str) -> str:
     return bytes2hex(*[bytes(datum, "ascii") for datum in data])
 
 
-Hex2BytesMap = {("%02x" % x): x for x in range(256)}
-
-
 def hex2bytes(hex: str) -> bytearray:
     assert len(hex) % 2 == 0
-    data = bytearray(len(hex) // 2)
-    for i in range(len(data)):
-        b = Hex2BytesMap[hex[2 * i : 2 * i + 2]]
-        data[i] = b
-    return data
+    return bytearray.fromhex(hex)
 
 
 def hex2string(hex: str) -> str:
