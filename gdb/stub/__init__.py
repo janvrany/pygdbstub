@@ -3,14 +3,13 @@ import io
 import logging
 import os
 import sys
+import traceback
 from argparse import ArgumentParser
 from fcntl import F_GETFL, F_SETFL, fcntl
 from selectors import EVENT_READ, DefaultSelector
 from socket import SocketIO
 
-from gdb.stub.arch import PowerPC64
-from gdb.stub.target import Null, Target
-from gdb.stub.target.microwatt import Microwatt
+from gdb.stub.target import Target
 
 logging.basicConfig()
 _logger = logging.getLogger(__name__)
@@ -351,9 +350,12 @@ class Stub(object):
                 return True
         try:
             handler(packet)
-        except Exception:
+        except Exception as e:
             # Error when processing the packet
             self._rsp.send("EF1")
+            _logger.error(
+                f"Error processing packet{packet}: {e}\n {traceback.format_exc()}"
+            )
         return True
 
     def check_target(self):
@@ -443,14 +445,17 @@ class Stub(object):
                 if handled is None:
                     self._rsp.send_unsupported()
                 elif handled is True:
-                    if response.getvalue() is None:
+                    if not response.getvalue():
                         self._rsp.send("OK")
                     else:
                         self._rsp.send(string2hex(*[response.getvalue()]))
                 else:
                     self._rsp.send("EF0")
-            except Exception:
+            except Exception as e:
                 self._rsp.send("EF1")
+                _logger.error(
+                    f"Error processing packet{packet}: {e}\n {traceback.format_exc()}"
+                )
         else:
             self._rsp.send_unsupported()
 
@@ -685,6 +690,10 @@ class Stub(object):
 
 
 def main(argv=sys.argv):
+    from gdb.stub.arch import PowerPC64
+    from gdb.stub.target import Null
+    from gdb.stub.target.microwatt import Microwatt
+
     targets = {
         "null-ppc64le": lambda *params: Null(PowerPC64(*params)),
         "microwatt": lambda *params: Microwatt(*params),
