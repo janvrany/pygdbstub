@@ -3,7 +3,7 @@ import struct
 from typing import TextIO
 
 from ..arch import PowerPC64
-from ..boards import Arty
+from ..boards import Board, Arty
 from . import Target
 
 
@@ -107,7 +107,7 @@ class Microwatt(Target):
         def __del__(self):
             self.disconnect()
 
-        def connect(self, board=Arty()):
+        def connect(self, board):
             self._urc = board.chain()
 
             # from bscane2_init()
@@ -221,10 +221,17 @@ class Microwatt(Target):
         def creset(self):
             self.dmi_write(DBG_CORE.CTRL, DBG_CORE.CTRL_RESET)
 
-    def __init__(self, board=Arty()):
+    def __init__(self, board : Board|None = None):
+        """
+        Initialize Microwatt on given board. If board is not specified,
+        defaults to Arty.
+        """
         super().__init__()
         self._cpustate = PowerPC64()
-        self._board = board
+        if board is not None:
+            self._board = board
+        else:
+            self._board = Arty()
         self._jtag = None
 
     def connect(self):

@@ -24,8 +24,8 @@ pip3 install -r requirements-dev.txt
 pip3 install ../urjtag/urjtag/bindings/python
 
 # Setup pre-commit and pre-push hooks (if you want)
-pipenv run pre-commit install -t pre-commit
-pipenv run pre-commit install -t pre-push
+pre-commit install -t pre-commit
+pre-commit install -t pre-push
 ```
 
 ## Usage examples
@@ -58,9 +58,19 @@ Then in GDB, connect to stub like:
 * connect to Microwatt on Arty FPGA (`-t microwatt`, Arty is default board for Microwatt target)
 * use stdio to communicate with GDB (default)
 
-## Debugging communication
+## For developers
 
-Some hints to help debuging communication between GDB and pygdbstub:
+### Running tests
+
+To run tests, just run:
+
+```
+pytest
+```
+
+### Debugging communication
+
+Some hints to help debugging communication between GDB and pygdbstub:
 
  * In GDB, turn on remote protocol debugging:
 
