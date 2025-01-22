@@ -4,5 +4,6 @@ isort
 mypy
 pre-commit
 pytest
+pytest-md
 pytest-cov
 ipdb
