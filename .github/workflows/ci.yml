@@ -1,0 +1,59 @@
+name: CI
+on:
+  # Triggers the workflow on push or pull request events...
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: "Tests - Python ${{matrix.python-version}}, ${{matrix.os}}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: pip3 install -r requirements-dev.txt
+          
+      - name: Run tests
+      - uses: pavelzw/pytest-action@v2
+        with:
+          emoji: false
+          verbose: false
+          job-summary: true
+
+  lint:
+    name: "Style checks"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        python-version: [ "3.12" ]
+        os: [ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+    
+      - name: Install dependencies
+        run: pip3 install -r requirements-dev.txt
+
+      - name: Run style checks
+        uses: pre-commit/action@v3.0.0
+        with:
+          extra_args: --all-files
