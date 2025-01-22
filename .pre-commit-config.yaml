@@ -34,11 +34,12 @@ repos:
 
     - id: pytest
       name: pytest
-      stages: [pre-commit, pre-push]
+      stages: [pre-push]
       language: system
       entry: .venv/bin/pytest
       types: [python]
       pass_filenames: false
+      always_run: true
 
     # - id: pytest-cov
     #   name: pytest
