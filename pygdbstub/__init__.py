@@ -9,7 +9,9 @@ from fcntl import F_GETFL, F_SETFL, fcntl
 from selectors import EVENT_READ, DefaultSelector
 from socket import SocketIO
 
-from gdb.stub.target import Target
+from .target import Target
+
+__version__ = "0.0.1"
 
 logging.basicConfig()
 _logger = logging.getLogger(__name__)
@@ -725,10 +727,10 @@ def main(argv=sys.argv):
         sys.breakpointhook = breakpointhook
         _logger.setLevel(logging.DEBUG)
     if args.board is not None:
-        import gdb.stub.boards
+        from . import boards
 
         try:
-            board = getattr(gdb.stub.boards, args.board)
+            board = getattr(boards, args.board)
         except AttributeError:
             print(f"No such board defined: {args.board}")
             return 1
