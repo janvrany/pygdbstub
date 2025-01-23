@@ -39,6 +39,10 @@ class IOPipe:
 
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
+        # Reuse address so we don't have to wait for socket to be
+        # close before we can bind to the port again
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
         # Wait for client to connect...
         try:
             listener.bind(("localhost", port))
@@ -50,6 +54,9 @@ class IOPipe:
             )
 
         client, addr = listener.accept()
+
+        # No delay in sending packets, to speed up communication
+        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
         # Once client connects, stop listening and
         # start stub on client socket
