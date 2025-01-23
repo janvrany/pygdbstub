@@ -19,11 +19,59 @@ class IOPipe:
     _logger = logging.getLogger(__name__ + ".io")
     _logger.disabled = True  # disabled by default to reduce noise
 
-    def __init__(
-        self,
-        _in=sys.stdin,
-        _out=sys.stdout,
-    ):
+    @staticmethod
+    def stdio():
+        """
+        Return a new IOPipe instance backed by stdio streams
+        (sys.stdin and sys.stdout)
+        """
+        return IOPipe(sys.stdin, sys.stdout)
+    
+    @staticmethod
+    def socket(port : int = 1234):
+        """
+        Listen on given port for incoming connection
+        and once client connects, return an IOPipe instance
+        backed by TCP socket to that client. Only one client
+        can connect.
+        """
+        import socket
+
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+        # Reuse address so we don't have to wait for socket to be
+        # close before we can bind to the port again
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # Wait for client to connect...
+        try:
+            listener.bind(("localhost", port))
+            _logger.info(f"Listening on localhost:{port}")
+            listener.listen(1)
+        except socket.error as e:
+            _logger.error(
+                f"Cannot listen on localhost:{port}: error {e[0]} - {e[1]}"
+            )
+
+        client, addr = listener.accept()
+
+        # No delay in sending packets, to speed up communication
+        client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+        # Once client connects, stop listening and
+        # start stub on client socket
+        try:
+            _logger.info(f"Client connected from {addr[0]}:{addr[1]}")
+            listener.close()
+            client_io = socket.SocketIO(client, "rw")
+            return IOPipe(client_io, client_io)            
+        except socket.error as e:
+            _logger.error(
+                f"Failed to handle client: {port}: error {e[0]} - {e[1]}"
+            )
+
+
+    def __init__(self, _in, _out):
         if isinstance(_in, io.BufferedReader):
             self._in = io.TextIOWrapper(_in, "ascii")
         elif isinstance(_in, io.RawIOBase):
@@ -56,6 +104,15 @@ class IOPipe:
 
     def flush(self):
         self._out.flush()
+
+    def close(self):
+        """
+        Close backing stream(s).
+        """
+        if self._in is not sys.stdin:
+            self._in.close()
+        if self._out is not sys.stdout:
+            self._out.close()
 
     @property
     def closed(self):
@@ -110,31 +167,17 @@ class IOPipe:
             return data
 
 
-Bytes2HexMap = ["%02x" % x for x in range(256)]
-
-
 def bytes2hex(*data: bytes) -> str:
-    hex = io.StringIO()
-    for datum in data:
-        for b in datum:
-            hex.write(Bytes2HexMap[b])
-    return hex.getvalue()
+    return "".join([datum.hex() for datum in data])
 
 
 def string2hex(*data: str) -> str:
     return bytes2hex(*[bytes(datum, "ascii") for datum in data])
 
 
-Hex2BytesMap = {("%02x" % x): x for x in range(256)}
-
-
 def hex2bytes(hex: str) -> bytearray:
     assert len(hex) % 2 == 0
-    data = bytearray(len(hex) // 2)
-    for i in range(len(data)):
-        b = Hex2BytesMap[hex[2 * i : 2 * i + 2]]
-        data[i] = b
-    return data
+    return bytearray.fromhex(hex)
 
 
 def hex2string(hex: str) -> str:
@@ -149,8 +192,18 @@ class RSP(object):
 
     _logger = logging.getLogger(__name__ + ".rsp")
 
-    def __init__(self, channel=IOPipe()):
+    def __init__(self, channel : IOPipe = IOPipe.stdio()):
         self._io = channel
+
+    def close(self):
+        """
+        Close tne object and associated resources (I/O streams).
+        Once the RSP is closed, it can no longer send or receive
+        packets.
+        """
+        if self._io is not None:
+            self._io.close()
+            self._io = None
 
     def send_ack(self, request_retransmit=False) -> None:
         if request_retransmit:
@@ -294,7 +347,7 @@ class Stub(object):
     _logger = logging.getLogger(__name__)
     _poll_interval = 0.5  # seconds
 
-    def __init__(self, target: Target, channel: IOPipe = IOPipe()):
+    def __init__(self, target: Target, channel: IOPipe = IOPipe.stdio()):
         self._target = target
         self._rsp = RSP(channel)
 
@@ -308,6 +361,7 @@ class Stub(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._target.disconnect()
+        self._rsp.close()
 
     #
     # Ensure that gets disconnected when the object is gone.
@@ -744,39 +798,10 @@ def main(argv=sys.argv):
         # communication - we do not want that
         _logger.disabled = True
         _logger.propagate = False
-        stub = Stub(target)
-        stub.start()
+
+        channel = IOPipe.stdio()        
     else:
-        #
-        # Listen on TCP port
-        #
-        from socket import AF_INET, SOCK_STREAM, error, socket
-
-        listener = socket(AF_INET, SOCK_STREAM)
-        # Wait for client to connect...
-        try:
-
-            listener.bind(("localhost", args.port))
-            _logger.info(f"Listening on localhost:{args.port}")
-            listener.listen(1)
-        except error as e:
-            _logger.error(
-                f"Cannot listen on localhost:{args.port}: error {e[0]} - {e[1]}"
-            )
-        client, addr = listener.accept()
-
-        # Once client connects, stop listening and
-        # start stub on client socket
-        try:
-            _logger.info(f"Client connected from {addr[0]}:{addr[1]}")
-            listener.close()
-            client_io = SocketIO(client, "rw")
-            try:
-                stub = Stub(target, IOPipe(client_io, client_io))
-                stub.start()
-            finally:
-                client_io.close()
-        except error as e:
-            _logger.error(
-                f"Failed to handle client: {args.port}: error {e[0]} - {e[1]}"
-            )
+        channel = IOPipe.socket(args.port)
+    
+    stub = Stub(target, channel)        
+    stub.start()
